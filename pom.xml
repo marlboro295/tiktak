@@ -95,20 +95,6 @@
                     </excludes>
                 </configuration>
             </plugin>
-
-            <!-- ИСПРАВЛЕННЫЙ ПЛАГИН - версия 8.4.0 -->
-            <plugin>
-                <groupId>org.owasp</groupId>
-                <artifactId>dependency-check-maven</artifactId>
-                <version>8.4.0</version>
-                <configuration>
-                    <format>HTML</format>
-                    <failBuildOnCVSS>11</failBuildOnCVSS>
-                    <skipSystemScope>true</skipSystemScope>
-                    <autoUpdate>false</autoUpdate>
-                    <cveValidForHours>720</cveValidForHours>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 
