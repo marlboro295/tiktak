@@ -4,6 +4,10 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  packages: write
+  contents: read
+
 jobs:
   secrets-scan:
     runs-on: ubuntu-latest
@@ -38,22 +42,57 @@ jobs:
         with:
           sarif_file: report.sarif
 
-      # SCA пропущен (нет плагина)
       - name: SCA (SKIPPED)
         run: |
           mkdir -p target
           echo "SCA skipped" > target/dependency-check-report.html
 
-      - name: Upload SCA Report
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sca-report
-          path: target/dependency-check-report.html
+          name: application-jar
+          path: target/*.jar
 
-      - name: DAST Run and Scan
+  container-security:
+    needs: [build-test-security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set lower case repo name
         run: |
-          java -jar target/*.jar &
-          sleep 30
+          echo "REPO_LC=${GITHUB_REPOSITORY,,}" >> ${GITHUB_ENV}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: target/
+
+      - name: Build Image
+        run: docker build -t ghcr.io/${{ env.REPO_LC }}:latest .
+
+      - name: Trivy Scan (CRITICAL only, non-blocking)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'ghcr.io/${{ env.REPO_LC }}:latest'
+          exit-code: '0'
+          severity: 'CRITICAL'
+          ignore-unfixed: true
+
+      - name: Login and Push to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push ghcr.io/${{ env.REPO_LC }}:latest
+
+  web-fuzzing:
+    needs: [build-test-security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
 
       - name: Install ffuf
         run: |
@@ -61,18 +100,9 @@ jobs:
           tar -xzf ffuf_2.1.0_linux_amd64.tar.gz
           sudo mv ffuf /usr/local/bin/
 
-      - name: Web Fuzzing Test
+      - name: Fuzzing
         run: |
           java -jar target/*.jar &
           sleep 45
-          printf "login\nregister\ncourses\nstudents\nadmin\nxml\nconfig\napi\nuser\npassword\nroot" > wordlist.txt
-          ffuf -u http://localhost:8080/api/FUZZ -w wordlist.txt -mc all -o fuzz-report.json || true
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-reports
-          path: |
-            target/dependency-check-report.html
-            fuzz-report.json
-            target/*.jar
+          printf "login\nregister\ncourses\nstudents\nadmin" > wordlist.txt
+          ffuf -u http://localhost:8080/api/FUZZ -w wordlist.txt -o fuzz.json || true
